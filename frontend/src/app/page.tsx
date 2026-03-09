@@ -1,66 +1,52 @@
-import Image from "next/image";
-import styles from "./page.module.css";
+'use client';
+
+import { useEffect, useState } from 'react';
+import { api } from '@/lib/api';
+import { Container, Typography, Box, CircularProgress } from '@mui/material';
 
 export default function Home() {
+  const [backendStatus, setBackendStatus] = useState<string>('Checking...');
+  const [mlStatus, setMlStatus] = useState<string>('Checking...');
+
+  useEffect(() => {
+    const checkServices = async () => {
+      try {
+        const backendRes = await api.get('/api/health');
+        setBackendStatus(`Backend: ${backendRes.data.message}`);
+      } catch (error) {
+        setBackendStatus('Backend: ❌ Not available');
+      }
+
+      try {
+        const mlRes = await fetch('http://localhost:8000/health');
+        const mlData = await mlRes.json();
+        setMlStatus(`ML-Core: ${mlData.service}`);
+      } catch (error) {
+        setMlStatus('ML-Core: ❌ Not available');
+      }
+    };
+
+    checkServices();
+  }, []);
+
   return (
-    <div className={styles.page}>
-      <main className={styles.main}>
-        <Image
-          className={styles.logo}
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className={styles.intro}>
-          <h1>To get started, edit the page.tsx file.</h1>
-          <p>
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className={styles.ctas}>
-          <a
-            className={styles.primary}
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className={styles.logo}
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className={styles.secondary}
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
-    </div>
+    <Container maxWidth="md" sx={{ mt: 4 }}>
+      <Box sx={{ textAlign: 'center' }}>
+        <Typography variant="h4" gutterBottom>
+          🎓 ВКР: Task Tracker with AI
+        </Typography>
+        <Typography variant="h6" color="text.secondary">
+          Студент: Анемподистов
+        </Typography>
+        
+        <Box sx={{ mt: 4, p: 3, bgcolor: 'background.paper', borderRadius: 2 }}>
+          <Typography variant="h6" gutterBottom>
+            📊 Статус сервисов
+          </Typography>
+          <Typography>{backendStatus}</Typography>
+          <Typography>{mlStatus}</Typography>
+        </Box>
+      </Box>
+    </Container>
   );
 }
