@@ -40,3 +40,24 @@ export const deleteTaskController = async (req: AuthRequest, res: Response, next
     next(error);
   }
 };
+
+export const getTasksByDateRangeController = async (
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const { start, end } = req.query;
+    if (!start || !end) {
+      return res.status(400).json({ error: 'Start and end dates required' });
+    }
+    const tasks = await taskService.getTasksByDateRange(
+      req.userId!,
+      start as string,
+      end as string
+    );
+    res.json(tasks);
+  } catch (error: any) {
+    next(error);
+  }
+};

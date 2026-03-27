@@ -5,6 +5,7 @@ import {
   getTasksController,
   updateTaskController,
   deleteTaskController,
+  getTasksByDateRangeController,
 } from '../controllers/task.controller';
 
 const router = Router();
@@ -15,5 +16,6 @@ router.post('/', createTaskController);
 router.get('/', getTasksController);
 router.put('/:id', updateTaskController);
 router.delete('/:id', deleteTaskController);
+router.get('range', getTasksByDateRangeController);
 
 export default router;
