@@ -1,32 +1,34 @@
 'use client';
 
-import { ReactNode, useState, useEffect } from 'react';
-import ThemeProvider from './ThemeProvider';
+import { ReactNode, useState, useLayoutEffect } from 'react';
 import { AppRouterCacheProvider } from '@mui/material-nextjs/v14-appRouter';
 import { CssBaseline } from '@mui/material';
+import ThemeProvider from './ThemeProvider';
+import ReduxProvider from './ReduxProvider';
 
 interface Props {
   children: ReactNode;
 }
 
 export default function Registry({ children }: Props) {
-  // Fix for hydration mismatch with CSS
   const [mounted, setMounted] = useState(false);
   
-  useEffect(() => {
+  useLayoutEffect(() => {
     setMounted(true);
   }, []);
 
   if (!mounted) {
-    return null; // или лоадер
+    return null;
   }
 
   return (
     <AppRouterCacheProvider options={{ enableCssLayer: true }}>
-      <ThemeProvider>
-        <CssBaseline />
-        {children}
-      </ThemeProvider>
+      <ReduxProvider>
+        <ThemeProvider>
+          <CssBaseline />
+          {children}
+        </ThemeProvider>
+      </ReduxProvider>
     </AppRouterCacheProvider>
   );
 }
