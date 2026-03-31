@@ -1,67 +1,107 @@
 import { PrismaClient } from '@prisma/client';
-import axios from 'axios';
 
 const prisma = new PrismaClient();
-const ML_API_URL = process.env.ML_API_URL || 'http://localhost:8000';
 
-export const createWorkLog = async (
-  userId: number,
-  taskId: number,
-  hours: number,
-  comment?: string
-) => {
-  const workLog = await prisma.workLog.create({
-    data: { userId, taskId, hours, comment },
-  });
+export interface IWorkLogService {
+  createWorkLog(data: any, userId: number): Promise<any>;
+  getWorkLogs(userId: number): Promise<any>;
+  finetuneUser(userId: number): Promise<any>; // Раздел 3.3.1
+}
 
-  // 🔥 Отправка обратной связи в ML-Core (Раздел 2.1.6)
-  try {
-    const task = await prisma.task.findUnique({ where: { id: taskId } });
-    if (task && task.estimatedHours) {
-      await axios.post(`${ML_API_URL}/feedback`, {
-        task_id: taskId,
-        actual_hours: hours,
-        estimated_hours: task.estimatedHours,
-      });
-    }
-  } catch (error) {
-    console.log('Failed to send feedback to ML-Core');
+export class WorkLogService implements IWorkLogService {
+  // Создать запись о работе (Раздел 3.2.4)
+  async createWorkLog(data: any, userId: number) {
+    const workLog = await prisma.workLog.create({
+      data: {
+        taskId: Number(data.taskId),
+        userId,
+        hours: Number(data.hours),
+        comment: data.comment,
+      },
+      include: {
+        task: true,
+      },
+    });
+
+    // Обновить actualHours в задаче
+    await prisma.task.update({
+      where: { id: Number(data.taskId) },
+      data: { actualHours: Number(data.hours) },
+    });
+
+    return workLog;
   }
 
-  // 🔥 Пересчёт speed_factor пользователя (Раздел 3.3.1)
-  await recalculateUserSpeed(userId);
+  // Получить все WorkLog пользователя
+  async getWorkLogs(userId: number) {
+    return await prisma.workLog.findMany({
+      where: { userId },
+      include: {
+        task: {
+          select: {
+            id: true,
+            title: true,
+            status: true,
+            estimatedHours: true,
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
 
-  return workLog;
-};
+  // Self-finetuning: обновить speedFactor (Раздел 3.3.1)
+  async finetuneUser(userId: number) {
+    // Алгоритм из раздела 3.3.1:
+    // k_скорости = mean(t_plan / t_fact)
 
-const recalculateUserSpeed = async (userId: number) => {
-  const workLogs = await prisma.workLog.findMany({
-    where: { userId },
-    include: { task: true },
-    take: 20, // Последние 20 задач
-  });
+    const workLogs = await prisma.workLog.findMany({
+      where: { userId },
+      include: { task: true },
+      orderBy: { createdAt: 'desc' },
+      take: 20, // N = 20
+    });
 
-  if (workLogs.length === 0) return;
+    // Фильтруем только завершённые задачи с оценками
+    const validLogs = workLogs.filter(log =>
+      log.task.status === 'DONE' &&
+      log.task.estimatedHours !== null &&
+      log.task.estimatedHours !== undefined &&
+      log.hours > 0
+    );
 
-  const ratios = workLogs
-    .filter(log => log.task.estimatedHours && log.task.estimatedHours! > 0)
-    .map(log => log.hours / log.task.estimatedHours!);
+    if (validLogs.length === 0) {
+      return {
+        message: 'Недостаточно данных для обучения',
+        speedFactor: 1.0,
+        accuracy: 0.0,
+        samplesUsed: 0,
+      };
+    }
 
-  if (ratios.length === 0) return;
+    // Вычисление коэффициента скорости (формула из Раздела 3.3.1)
+    const ratios = validLogs.map(log =>
+      log.task.estimatedHours! / log.hours
+    );
+    const newSpeedFactor = ratios.reduce((a, b) => a + b, 0) / ratios.length;
 
-  const avgRatio = ratios.reduce((a, b) => a + b, 0) / ratios.length;
-  const speedFactor = 1 / avgRatio;
+    // Вычисление точности (MAPE)
+    const mape = ratios.reduce((acc, r) => acc + Math.abs(1 - r), 0) / ratios.length;
+    const accuracy = Math.max(0, Math.min(1, 1 - mape));
 
-  await prisma.user.update({
-    where: { id: userId },
-    data: { speedFactor },
-  });
-};
+    // Обновление профиля пользователя
+    await prisma.user.update({
+      where: { id: userId },
+      data: { speedFactor: newSpeedFactor, accuracy },
+    });
 
-export const getWorkLogs = async (userId: number) => {
-  return await prisma.workLog.findMany({
-    where: { userId },
-    include: { task: true },
-    orderBy: { createdAt: 'desc' },
-  });
-};
+    return {
+      message: 'Коэффициент скорости обновлён',
+      speedFactor: Number(newSpeedFactor.toFixed(3)),
+      accuracy: Number(accuracy.toFixed(3)),
+      samplesUsed: validLogs.length,
+    };
+  }
+}
+
+export const workLogService = new WorkLogService();

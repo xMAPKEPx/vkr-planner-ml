@@ -1,0 +1,14 @@
+{
+  "subtasks": [
+    {"title": "Изучить требования", "estimatedHours": 2, "order": 0},
+    {"title": "Спроектировать архитектуру", "estimatedHours": 3, "order": 1},
+    {"title": "Реализовать базовую функциональность", "estimatedHours": 8, "order": 2},
+    {"title": "Написать тесты", "estimatedHours": 4, "order": 3},
+    {"title": "Провести код-ревью", "estimatedHours": 2, "order": 4},
+    {"title": "Деплой на staging", "estimatedHours": 1, "order": 5}
+  ],
+  "userId": 1,
+  "dueDate": "2025-02-01",
+  "userSpeedFactor": 1.0,
+  "startDate": "2025-01-20"
+}

@@ -1,32 +1,25 @@
-import app from './app';
-import { PrismaClient } from '@prisma/client';
+import express from 'express';
+import cors from 'cors';
 import dotenv from 'dotenv';
+import routes from './routes';
 
 dotenv.config();
 
-const prisma = new PrismaClient();
-const PORT = process.env.PORT || 3001;
+const app = express();
+const PORT = process.env.PORT || 4000;
 
-// Подключение к БД при старте
-async function startServer() {
-  try {
-    await prisma.$connect();
-    console.log('✅ Database connected');
-    
-    app.listen(PORT, () => {
-      console.log(`🚀 Backend running on http://localhost:${PORT}`);
-      console.log(`📍 Health: http://localhost:${PORT}/api/health`);
-    });
-  } catch (error) {
-    console.error('❌ Failed to start server:', error);
-    process.exit(1);
-  }
-}
+app.use(cors());
+app.use(express.json());
 
-startServer();
+// API routes
+app.use('/api', routes);
 
-// Graceful shutdown
-process.on('SIGINT', async () => {
-  await prisma.$disconnect();
-  process.exit();
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 Backend запущен на порту ${PORT}`);
+  console.log(`📚 API: http://localhost:${PORT}/api`);
 });

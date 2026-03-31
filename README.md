@@ -138,7 +138,7 @@ source venv/bin/activate  # Для Windows: venv\Scripts\activate
 pip install -r requirements.txt
 
 # Запустите сервис
-python main.py
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 *ML сервис будет доступен по адресу: `http://localhost:8000`*
 

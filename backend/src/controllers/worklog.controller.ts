@@ -1,22 +1,30 @@
-import { Response, NextFunction } from 'express';
-import { AuthRequest } from '../middleware/auth.middleware';
-import * as worklogService from '../services/worklog.service';
+import { Response } from 'express';
+import { AuthRequest } from '../middleware/auth';
+import { workLogService } from '../services/worklog.service';
 
-export const createWorkLogController = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const createWorkLog = async (req: AuthRequest, res: Response) => {
   try {
-    const { taskId, hours, comment } = req.body;
-    const workLog = await worklogService.createWorkLog(req.userId!, taskId, hours, comment);
+    const workLog = await workLogService.createWorkLog(req.body, req.user!.id);
     res.status(201).json(workLog);
   } catch (error: any) {
-    next(error);
+    res.status(400).json({ error: error.message });
   }
 };
 
-export const getWorkLogsController = async (req: AuthRequest, res: Response, next: NextFunction) => {
+export const getWorkLogs = async (req: AuthRequest, res: Response) => {
   try {
-    const workLogs = await worklogService.getWorkLogs(req.userId!);
-    res.json(workLogs);
-  } catch (error: any) {
-    next(error);
+    const logs = await workLogService.getWorkLogs(req.user!.id);
+    res.json(logs);
+  } catch (error) {
+    res.status(500).json({ error: 'Ошибка получения записей' });
+  }
+};
+
+export const finetuneUser = async (req: AuthRequest, res: Response) => {
+  try {
+    const result = await workLogService.finetuneUser(req.user!.id);
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Ошибка self-finetuning' });
   }
 };

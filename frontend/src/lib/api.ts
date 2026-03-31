@@ -37,13 +37,24 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
     (response) => response,
     (error) => {
-        if (error.response?.status === 401) {
+        const status = error.response?.status;
+        const url = error.config?.url;
+
+        // ✅ НЕ редиректить, если это запрос логина/регистрации
+        // (компонент сам должен показать ошибку)
+        const isAuthEndpoint =
+            url?.includes('/auth/login') || url?.includes('/auth/register');
+
+        if (status === 401 && !isAuthEndpoint) {
             if (typeof window !== 'undefined') {
+                console.warn('🔐 401 detected - clearing auth and redirecting');
                 localStorage.removeItem('token');
                 localStorage.removeItem('user');
                 window.location.href = '/login';
             }
         }
+
+        // Для auth-эндпоинтов просто пробрасываем ошибку дальше
         return Promise.reject(error);
     },
 );
@@ -101,26 +112,26 @@ export const workLogsAPI = {
 // };
 
 export const dashboardAPI = {
-  getStats: async () => {
-    // 🔥 Временная заглушка
-    if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
-      const { mockDashboardStats } = await import('./mockData');
-      return { data: mockDashboardStats };
-    }
-    return api.get<DashboardStats>('/api/dashboard/stats');
-  },
-  getAccuracyTrend: async () => {
-    if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
-      const { mockAccuracyTrend } = await import('./mockData');
-      return { data: mockAccuracyTrend };
-    }
-    return api.get<AccuracyTrend[]>('/api/dashboard/accuracy-trend');
-  },
-  getCategoryStats: async () => {
-    if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
-      const { mockCategoryStats } = await import('./mockData');
-      return { data: mockCategoryStats };
-    }
-    return api.get<CategoryStats[]>('/api/dashboard/category-stats');
-  },
+    getStats: async () => {
+        // 🔥 Временная заглушка
+        if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
+            const { mockDashboardStats } = await import('./mockData');
+            return { data: mockDashboardStats };
+        }
+        return api.get<DashboardStats>('/api/dashboard/stats');
+    },
+    getAccuracyTrend: async () => {
+        if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
+            const { mockAccuracyTrend } = await import('./mockData');
+            return { data: mockAccuracyTrend };
+        }
+        return api.get<AccuracyTrend[]>('/api/dashboard/accuracy-trend');
+    },
+    getCategoryStats: async () => {
+        if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
+            const { mockCategoryStats } = await import('./mockData');
+            return { data: mockCategoryStats };
+        }
+        return api.get<CategoryStats[]>('/api/dashboard/category-stats');
+    },
 };

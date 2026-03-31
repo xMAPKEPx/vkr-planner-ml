@@ -17,27 +17,60 @@ import {
 import Link from 'next/link';
 
 export default function LoginPage() {
-    const router = useRouter();
     const dispatch = useAppDispatch();
 
     const [formData, setFormData] = useState({ email: '', password: '' });
     const [error, setError] = useState('');
     const [loading, setLoading] = useState(false);
 
+    const addLog = (msg: string) => {
+        console.log(`[Login Debug] ${msg}`);
+    };
+
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        addLog('▶️ Начало входа');
+
         setLoading(true);
         setError('');
 
+        addLog(`📧 Email: ${formData.email}`);
+        addLog('📡 Отправка запроса к API...');
+
         try {
             const { data } = await authAPI.login(formData);
-            // Диспатчим экшен в Redux
+            addLog(`✅ Ответ получен: ${JSON.stringify(data.user)}`);
+
+            if (!data?.token) {
+                throw new Error('Токен отсутствует в ответе');
+            }
+
+            addLog('🔄 Dispatch login...');
             dispatch(login(data));
-            router.push('/tasks');
+            addLog('✅ Redux обновлён');
+
+            addLog('🔁 Редирект на /dashboard через window.location.href');
+
+            // ✅ Критично: НЕ используем router.push()
+            window.location.href = '/dashboard';
+
+            // ✅ Явный return
+            addLog('✅ Функция завершена (return)');
+            return;
         } catch (err: any) {
-            setError(err.response?.data?.error || 'Login failed');
+            addLog(`❌ ОШИБКА: ${err.message}`);
+            addLog(`📊 Status: ${err.response?.status}`);
+            addLog(`📦 Response: ${JSON.stringify(err.response?.data)}`);
+
+            setError(
+                err.response?.data?.error || err.message || 'Ошибка входа',
+            );
+
+            // ✅ НЕ редиректим!
+            addLog('⛔ Редирект ОТМЕНЁН (ошибка)');
         } finally {
             setLoading(false);
+            addLog('🏁 Finally block (loading = false)');
         }
     };
 
@@ -74,6 +107,16 @@ export default function LoginPage() {
                         {error}
                     </Alert>
                 )}
+
+                {/* 🔍 Debug панель - удалишь после отладки
+                {debugLog.length > 0 && (
+                    <Box sx={{ mt: 2, p: 2, bgcolor: '#f5f5f5', borderRadius: 1, maxHeight: 200, overflow: 'auto' }}>
+                        <Typography variant='caption' fontWeight='bold'>Debug Log:</Typography>
+                        {debugLog.map((log, i) => (
+                            <Typography key={i} variant='caption' display='block'>{log}</Typography>
+                        ))}
+                    </Box>
+                )} */}
 
                 <Box
                     component='form'

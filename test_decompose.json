@@ -1,0 +1,6 @@
+{
+  "title": "Разработать API для задач с авторизацией",
+  "description": "Нужно создать CRUD эндпоинты с JWT-аутентификацией",
+  "categoryId": null,
+  "userSpeedFactor": 1.0
+}
