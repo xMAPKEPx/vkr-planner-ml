@@ -8,6 +8,9 @@ import type {
     RegisterRequest,
     CreateTaskRequest,
     CreateWorkLogRequest,
+    DashboardStats,
+    AccuracyTrend,
+    CategoryStats,
 } from '@/types';
 import { Subtask, CreateSubtaskRequest } from '@/store/slices/subtaskSlice';
 
@@ -86,4 +89,38 @@ export const workLogsAPI = {
     getAll: () => api.get<WorkLog[]>('/api/worklogs'),
     create: (data: CreateWorkLogRequest) =>
         api.post<WorkLog>('/api/worklogs', data),
+};
+
+// =============================================
+// Dashboard API
+// =============================================
+// export const dashboardAPI = {
+//   getStats: () => api.get<DashboardStats>('/api/dashboard/stats'),
+//   getAccuracyTrend: () => api.get<AccuracyTrend[]>('/api/dashboard/accuracy-trend'),
+//   getCategoryStats: () => api.get<CategoryStats[]>('/api/dashboard/category-stats'),
+// };
+
+export const dashboardAPI = {
+  getStats: async () => {
+    // 🔥 Временная заглушка
+    if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
+      const { mockDashboardStats } = await import('./mockData');
+      return { data: mockDashboardStats };
+    }
+    return api.get<DashboardStats>('/api/dashboard/stats');
+  },
+  getAccuracyTrend: async () => {
+    if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
+      const { mockAccuracyTrend } = await import('./mockData');
+      return { data: mockAccuracyTrend };
+    }
+    return api.get<AccuracyTrend[]>('/api/dashboard/accuracy-trend');
+  },
+  getCategoryStats: async () => {
+    if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
+      const { mockCategoryStats } = await import('./mockData');
+      return { data: mockCategoryStats };
+    }
+    return api.get<CategoryStats[]>('/api/dashboard/category-stats');
+  },
 };

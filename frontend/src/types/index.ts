@@ -68,3 +68,30 @@ export interface CreateWorkLogRequest {
     hours: number;
     comment?: string;
 }
+
+
+export interface DashboardStats {
+  totalTasks: number;
+  completedTasks: number;
+  totalHours: number;
+  avgAccuracy: number;
+  speedFactor: number;
+  tasksOnTime: number;
+  tasksLate: number;
+}
+
+export interface AccuracyTrend {
+  month: string;
+  accuracy: number;
+  estimatedHours: number;
+  actualHours: number;
+}
+
+export interface CategoryStats {
+  category: string;
+  count: number;
+  avgEstimatedHours: number;
+  avgActualHours: number;
+  accuracy: number;
+}
+

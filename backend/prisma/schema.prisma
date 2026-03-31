@@ -7,14 +7,18 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Роль пользователя (Раздел 3.2.1)
+// ---------------------------------------------------------------------------
+// СПРАВОЧНИКИ И ПЕРЕЧИСЛЕНИЯ
+// ---------------------------------------------------------------------------
+
+// Раздел 3.2.1: Роли пользователей (Пользователь, Тимлид, Администратор)
 enum Role {
   USER
   TEAM_LEAD
   ADMIN
 }
 
-// Статус задачи
+// Раздел 2.1.2: Статусы задач в процессе планирования
 enum TaskStatus {
   TODO
   IN_PROGRESS
@@ -22,13 +26,29 @@ enum TaskStatus {
   CANCELLED
 }
 
-// Приоритет задачи
+// Раздел 2.1.2: Приоритеты для генерации расписаний
 enum Priority {
   LOW
   MEDIUM
   HIGH
 }
 
+// ---------------------------------------------------------------------------
+// ОСНОВНЫЕ МОДЕЛИ
+// ---------------------------------------------------------------------------
+
+// Раздел 3.2.2: Категории задач для шаблонов и ML-классификации
+model Category {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique  // "разработка", "обучение", "документирование"
+  baseTime    Float?   // Базовая оценка времени для шаблонов
+  description String?
+  tasks       Task[]
+  
+  @@map("categories")
+}
+
+// Раздел 3.2.1: Пользователь (Исполнитель / Тимлид / Админ)
 model User {
   id           Int       @id @default(autoincrement())
   email        String    @unique
@@ -36,19 +56,26 @@ model User {
   name         String?
   role         Role      @default(USER)
   
-  // Для self-finetuning (Раздел 3.3.1)
-  speedFactor  Float     @default(1.0)
-  accuracy     Float     @default(0.0)
+  // Раздел 3.3.1: Параметры для алгоритма self-finetuning
+  speedFactor  Float     @default(1.0)  // Коэффициент скорости (k_скорости)
+  accuracy     Float     @default(0.0)  // Точность оценок (MAPE)
   
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
   
-  tasks        Task[]
-  workLogs     WorkLog[]
+  // Связи: Личные задачи
+  tasks        Task[]                @relation("UserTasks")
+  workLogs     WorkLog[]             @relation("UserWorkLogs")
+  
+  // Связи: Командное планирование (Раздел 2.2)
+  ledTeams     Team[]                @relation("TeamLead")         // Команды, где пользователь — лид
+  memberships  TeamMember[]          @relation("TeamMemberships")  // Команды, где пользователь — участник
+  assignedTasks Task[]               @relation("TaskAssignee")     // Задачи, назначенные пользователю в проекте
   
   @@map("users")
 }
 
+// Раздел 2.1.3: Задача (с поддержкой декомпозиции WBS)
 model Task {
   id             Int         @id @default(autoincrement())
   title          String
@@ -56,16 +83,34 @@ model Task {
   status         TaskStatus  @default(TODO)
   priority       Priority    @default(MEDIUM)
   
-  // Оценка времени (Раздел 3.3.1)
+  // Раздел 3.3.1: Оценка времени (План / Факт)
   estimatedHours Float?
   actualHours    Float?
   
-  // Планирование
+  // Планирование и сроки
   dueDate        DateTime?
   completedAt    DateTime?
   
+  // Раздел 2.1.3: Декомпозиция (WBS — иерархия подзадач)
+  parentId       Int?
+  parent         Task?       @relation("TaskHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  subtasks       Task[]      @relation("TaskHierarchy")
+  
+  // Категоризация для ML (Раздел 3.2.2)
+  categoryId     Int?
+  category       Category?   @relation(fields: [categoryId], references: [id])
+  
+  // Владелец задачи (кто создал)
   userId         Int
-  user           User        @relation(fields: [userId], references: [id])
+  user           User        @relation("UserTasks", fields: [userId], references: [id])
+  
+  // Назначенный исполнитель (для командных задач, Раздел 2.2.4)
+  assignedTo     Int?
+  assignee       User?       @relation("TaskAssignee", fields: [assignedTo], references: [id])
+  
+  // Проект (Раздел 2.2)
+  projectId      Int?
+  project        Project?    @relation(fields: [projectId], references: [id])
   
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
@@ -75,18 +120,77 @@ model Task {
   @@map("tasks")
 }
 
+// Раздел 3.2.4: Журнал работы (для сбора данных и self-finetuning)
 model WorkLog {
   id            Int      @id @default(autoincrement())
   taskId        Int
   task          Task     @relation(fields: [taskId], references: [id])
   userId        Int
-  user          User     @relation(fields: [userId], references: [id])
+  user          User     @relation("UserWorkLogs", fields: [userId], references: [id])
   
-  // Фактическое время (для self-finetuning)
+  // Фактическое время (основа для обучения, Раздел 3.3.1)
   hours         Float
   comment       String?
   
   createdAt     DateTime @default(now())
   
   @@map("work_logs")
+}
+
+// ---------------------------------------------------------------------------
+// КОМАНДНОЕ ПЛАНИРОВАНИЕ (Раздел 2.2)
+// ---------------------------------------------------------------------------
+
+// Раздел 2.2.1: Команда
+model Team {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  
+  // Лид команды (Раздел 3.2.1)
+  leadId      Int
+  lead        User     @relation("TeamLead", fields: [leadId], references: [id])
+  
+  members     TeamMember[]
+  projects    Project[]
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("teams")
+}
+
+// Раздел 2.2.4: Участник команды (связь M:M)
+model TeamMember {
+  id        Int      @id @default(autoincrement())
+  teamId    Int
+  team      Team     @relation(fields: [teamId], references: [id])
+  userId    Int
+  user      User     @relation("TeamMemberships", fields: [userId], references: [id])
+  role      String?  // "developer", "designer", "analyst"
+  
+  joinedAt  DateTime @default(now())
+  
+  @@unique([teamId, userId])
+  @@map("team_members")
+}
+
+// Раздел 2.2.1: Проект (группа задач для команды)
+model Project {
+  id          Int      @id @default(autoincrement())
+  title       String
+  description String?
+  
+  teamId      Int
+  team        Team     @relation(fields: [teamId], references: [id])
+  
+  tasks       Task[]
+  
+  startDate   DateTime?
+  endDate     DateTime?
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  
+  @@map("projects")
 }
