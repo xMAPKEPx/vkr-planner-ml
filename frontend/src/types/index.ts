@@ -11,8 +11,8 @@ export interface Task {
   description?: string;
   estimatedDuration: number; // Плановое время (минуты)
   actualDuration?: number;   // Фактическое время (минуты)
-  startDate: Date;
-  endDate: Date;
+  startDate: string; // ISO 8601 date string
+  endDate: string;
   status: 'todo' | 'in_progress' | 'done';
   userId: string;
   assignee?: string;
