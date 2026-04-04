@@ -1,137 +1,92 @@
+// lib/api.ts
 import axios from 'axios';
-import type {
-    User,
-    Task,
-    WorkLog,
-    AuthResponse,
-    LoginRequest,
-    RegisterRequest,
-    CreateTaskRequest,
-    CreateWorkLogRequest,
-    DashboardStats,
-    AccuracyTrend,
-    CategoryStats,
-} from '@/types';
-import { Subtask, CreateSubtaskRequest } from '@/store/slices/subtaskSlice';
+import { Task, WorkLogEntry } from '@/types';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
-
+// Создаем axios инстанс
 export const api = axios.create({
-    baseURL: API_URL,
-    headers: {
-        'Content-Type': 'application/json',
-    },
+  baseURL: process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001/api',
+  headers: {
+    'Content-Type': 'application/json',
+  },
 });
 
-// Интерцептор для добавления токена
-api.interceptors.request.use((config) => {
-    const token =
-        typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-    if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
+// МОКОВЫЕ ДАННЫЕ (пока нет реального бэкенда)
+const mockTasks: Task[] = [
+  {
+    id: '1',
+    title: 'Проектирование БД',
+    description: 'Спроектировать структуру базы данных',
+    estimatedDuration: 120,
+    startDate: new Date(2026, 3, 4, 10, 0),
+    endDate: new Date(2026, 3, 4, 12, 0),
+    status: 'in_progress',
+    userId: 'user-1',
+    category: 'development',
+  },
+];
+
+// Эмуляция задержки сети
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+// API методы (ПОТОМ ЗАМЕНИМ НА РЕАЛЬНЫЕ ВЫЗОВЫ)
+export const tasksApi = {
+  // Получить все задачи
+  getAll: async (): Promise<Task[]> => {
+    await delay(300); // эмуляция запроса
+    return mockTasks;
+  },
+
+  // Создать задачу
+  create: async (taskData: Partial<Task>): Promise<Task> => {
+    await delay(500);
+    const newTask: Task = {
+      id: Date.now().toString(),
+      title: taskData.title || 'Новая задача',
+      description: taskData.description,
+      estimatedDuration: taskData.estimatedDuration || 60,
+      startDate: taskData.startDate || new Date(),
+      endDate: taskData.endDate || new Date(),
+      status: 'todo',
+      userId: taskData.userId || 'user-1',
+      category: taskData.category,
+    };
+    mockTasks.push(newTask);
+    return newTask;
+  },
+
+  // Завершить задачу (с фиксацией WorkLog)
+  complete: async (workLog: WorkLogEntry): Promise<{ success: boolean; newSpeedFactor?: number; mape?: number; }> => {
+    await delay(500);
+    
+    // Обновляем задачу
+    const task = mockTasks.find(t => t.id === workLog.taskId);
+    if (task) {
+      task.status = 'done';
+      task.actualDuration = workLog.actualDuration;
     }
-    return config;
-});
 
-// Интерцептор для обработки ошибок авторизации
-api.interceptors.response.use(
-    (response) => response,
-    (error) => {
-        const status = error.response?.status;
-        const url = error.config?.url;
+    // Здесь потом будет реальный вызов бэкенда
+    // который запустит self-finetuning алгоритм
+    console.log('📊 WorkLog отправлен:', workLog);
+    console.log('🤖 Запускаем пересчет коэффициента скорости...');
+    
+    // Эмуляция ответа от ML-core
+    const newSpeedFactor = 1.0 + (Math.random() * 0.2 - 0.1);
+    
+    return {
+      success: true,
+      newSpeedFactor,
+      mape: 12.5,
+    };
+  },
 
-        // ✅ НЕ редиректить, если это запрос логина/регистрации
-        // (компонент сам должен показать ошибку)
-        const isAuthEndpoint =
-            url?.includes('/auth/login') || url?.includes('/auth/register');
-
-        if (status === 401 && !isAuthEndpoint) {
-            if (typeof window !== 'undefined') {
-                console.warn('🔐 401 detected - clearing auth and redirecting');
-                localStorage.removeItem('token');
-                localStorage.removeItem('user');
-                window.location.href = '/login';
-            }
-        }
-
-        // Для auth-эндпоинтов просто пробрасываем ошибку дальше
-        return Promise.reject(error);
-    },
-);
-
-// ============================================
-// Auth API
-// ============================================
-export const authAPI = {
-    login: (data: LoginRequest) =>
-        api.post<AuthResponse>('/api/auth/login', data),
-    register: (data: RegisterRequest) =>
-        api.post<AuthResponse>('/api/auth/register', data),
-};
-
-// ============================================
-// Tasks API
-// ============================================
-export const tasksAPI = {
-    getAll: () => api.get<Task[]>('/api/tasks'),
-    getByDateRange: (start: string, end: string) =>
-        api.get<Task[]>(`/api/tasks/range?start=${start}&end=${end}`),
-    getById: (id: number) => api.get<Task>(`/api/tasks/${id}`),
-    create: (data: CreateTaskRequest) => api.post<Task>('/api/tasks', data),
-    update: (id: number, data: Partial<Task>) =>
-        api.put<Task>(`/api/tasks/${id}`, data),
-    delete: (id: number) => api.delete(`/api/tasks/${id}`),
-};
-
-export const subtasksAPI = {
-    getByTask: (taskId: number) =>
-        api.get<Subtask[]>(`/api/subtasks/task/${taskId}`),
-    create: (taskId: number, data: CreateSubtaskRequest) =>
-        api.post<Subtask>(`/api/subtasks/task/${taskId}`, data),
-    update: (id: number, data: Partial<Subtask>) =>
-        api.put<Subtask>(`/api/subtasks/${id}`, data),
-    delete: (id: number) => api.delete(`/api/subtasks/${id}`),
-};
-
-// ============================================
-// WorkLogs API
-// ============================================
-export const workLogsAPI = {
-    getAll: () => api.get<WorkLog[]>('/api/worklogs'),
-    create: (data: CreateWorkLogRequest) =>
-        api.post<WorkLog>('/api/worklogs', data),
-};
-
-// =============================================
-// Dashboard API
-// =============================================
-// export const dashboardAPI = {
-//   getStats: () => api.get<DashboardStats>('/api/dashboard/stats'),
-//   getAccuracyTrend: () => api.get<AccuracyTrend[]>('/api/dashboard/accuracy-trend'),
-//   getCategoryStats: () => api.get<CategoryStats[]>('/api/dashboard/category-stats'),
-// };
-
-export const dashboardAPI = {
-    getStats: async () => {
-        // 🔥 Временная заглушка
-        if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
-            const { mockDashboardStats } = await import('./mockData');
-            return { data: mockDashboardStats };
-        }
-        return api.get<DashboardStats>('/api/dashboard/stats');
-    },
-    getAccuracyTrend: async () => {
-        if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
-            const { mockAccuracyTrend } = await import('./mockData');
-            return { data: mockAccuracyTrend };
-        }
-        return api.get<AccuracyTrend[]>('/api/dashboard/accuracy-trend');
-    },
-    getCategoryStats: async () => {
-        if (process.env.NEXT_PUBLIC_USE_MOCK === 'true') {
-            const { mockCategoryStats } = await import('./mockData');
-            return { data: mockCategoryStats };
-        }
-        return api.get<CategoryStats[]>('/api/dashboard/category-stats');
-    },
+  // Получить статистику пользователя
+  getUserStats: async (userId: string) => {
+    await delay(300);
+    return {
+      totalTasks: mockTasks.filter(t => t.userId === userId).length,
+      completedTasks: mockTasks.filter(t => t.userId === userId && t.status === 'done').length,
+      avgAccuracy: 85, // MAPE из ВКР
+    };
+  },
 };

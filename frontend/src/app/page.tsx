@@ -11,7 +11,7 @@ export default function Home() {
 
     useEffect(() => {
         if (isAuthenticated) {
-            router.push('/tasks');
+            router.push('/dashboard');
         }
     }, [isAuthenticated, router]);
 

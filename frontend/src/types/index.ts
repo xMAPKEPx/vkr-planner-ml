@@ -1,97 +1,56 @@
 export interface User {
-    id: number;
-    email: string;
-    name: string | null;
-    role: 'USER' | 'TEAM_LEAD' | 'ADMIN';
-    speedFactor: number;
-    accuracy: number;
+  id: string;
+  name: string;
+  email: string;
+  speedFactor?: number; // Коэффициент скорости (из ВКР п. 3.3.1)
 }
 
 export interface Task {
-    id: number;
-    title: string;
-    description: string | null;
-    status: 'TODO' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED';
-    priority: 'LOW' | 'MEDIUM' | 'HIGH';
-    estimatedHours: number | null;
-    actualHours: number | null;
-    dueDate: string | null;
-    completedAt: string | null;
-    userId: number;
-    createdAt: string;
-    updatedAt: string;
+  id: string;
+  title: string;
+  description?: string;
+  estimatedDuration: number; // Плановое время (минуты)
+  actualDuration?: number;   // Фактическое время (минуты)
+  startDate: Date;
+  endDate: Date;
+  status: 'todo' | 'in_progress' | 'done';
+  userId: string;
+  assignee?: string;
+  projectId?: string;
+  subtasks?: Subtask[];
+  category?: string;
 }
 
-export interface WorkLog {
-    id: number;
-    taskId: number;
-    userId: number;
-    hours: number;
-    comment: string | null;
-    createdAt: string;
-    task?: Task;
+export interface Subtask {
+  id: string;
+  title: string;
+  estimatedDuration: number;
+  actualDuration?: number;
+  status: 'todo' | 'done';
 }
 
-export interface AuthResponse {
-    user: User;
-    token: string;
+// WorkLog - основа для self-finetuning (ВКР п. 3.3.1)
+export interface WorkLogEntry {
+  taskId: string;
+  userId: string;
+  plannedDuration: number;  // t_plan
+  actualDuration: number;   // t_fact
+  completedAt: Date;
+  category?: string;
 }
 
-export interface LoginRequest {
-    email: string;
-    password: string;
+export interface Project {
+  id: string;
+  name: string;
+  teamId: string;
+  members: User[];
+  tasks: Task[];
 }
 
-export interface RegisterRequest {
-    email: string;
-    password: string;
-    name?: string;
+export interface Team {
+  id: string;
+  name: string;
+  color: string;
+  isVisible: boolean;
+  projects: Project[];
 }
-
-export interface CreateTaskRequest {
-    title: string;
-    description?: string;
-    priority?: 'LOW' | 'MEDIUM' | 'HIGH';
-    dueDate?: string;
-}
-
-export interface CreateSubtaskRequest {
-    title: string;
-    description?: string;
-    estimatedHours?: number;
-    order?: number;
-    parentId?: number | null;
-}
-
-export interface CreateWorkLogRequest {
-    taskId: number;
-    hours: number;
-    comment?: string;
-}
-
-
-export interface DashboardStats {
-  totalTasks: number;
-  completedTasks: number;
-  totalHours: number;
-  avgAccuracy: number;
-  speedFactor: number;
-  tasksOnTime: number;
-  tasksLate: number;
-}
-
-export interface AccuracyTrend {
-  month: string;
-  accuracy: number;
-  estimatedHours: number;
-  actualHours: number;
-}
-
-export interface CategoryStats {
-  category: string;
-  count: number;
-  avgEstimatedHours: number;
-  avgActualHours: number;
-  accuracy: number;
-}
-

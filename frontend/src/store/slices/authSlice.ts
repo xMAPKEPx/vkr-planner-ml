@@ -15,7 +15,8 @@ const getInitialState = (): AuthState => {
     return {
       user: user ? JSON.parse(user) : null,
       token,
-      isAuthenticated: !!token,
+      isAuthenticated: true,
+      // !!token
     };
   }
   return {
