@@ -39,6 +39,7 @@ class DecompositionResponse(BaseModel):
     method: str
     category: str
     confidence: float
+    parsedDeadline: Optional[str] = None
 
 class ScheduleGenerationRequest(BaseModel):
     subtasks: List[Subtask]

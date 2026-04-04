@@ -1,58 +1,37 @@
-from typing import List, Dict
 from app.models.schemas import Subtask
 
-# Шаблоны WBS для категорий (Раздел 3.2.2)
 WBS_TEMPLATES = {
-    'разработка': [
-        {'title': 'Изучить требования', 'hours': 2},
-        {'title': 'Спроектировать архитектуру', 'hours': 3},
-        {'title': 'Реализовать базовую функциональность', 'hours': 8},
-        {'title': 'Написать тесты', 'hours': 4},
-        {'title': 'Провести код-ревью', 'hours': 2},
-        {'title': 'Деплой на staging', 'hours': 1},
+    "development": [
+        Subtask(title="Анализ требований", estimatedHours=2.0, order=1),
+        Subtask(title="Проектирование архитектуры", estimatedHours=4.0, order=2),
+        Subtask(title="Реализация кода", estimatedHours=8.0, order=3),
+        Subtask(title="Тестирование и отладка", estimatedHours=3.0, order=4),
+        Subtask(title="Документирование", estimatedHours=1.5, order=5),
     ],
-    'тестирование': [
-        {'title': 'Составить тест-план', 'hours': 2},
-        {'title': 'Написать автотесты', 'hours': 6},
-        {'title': 'Провести ручное тестирование', 'hours': 4},
-        {'title': 'Завести баг-репорты', 'hours': 2},
-        {'title': 'Проверить исправления', 'hours': 2},
+    "design": [
+        Subtask(title="Сбор референсов", estimatedHours=1.5, order=1),
+        Subtask(title="Прототипирование", estimatedHours=3.0, order=2),
+        Subtask(title="Визуальный дизайн", estimatedHours=6.0, order=3),
+        Subtask(title="Адаптация и экспорт", estimatedHours=2.0, order=4),
     ],
-    'документирование': [
-        {'title': 'Собрать информацию', 'hours': 2},
-        {'title': 'Написать черновик', 'hours': 4},
-        {'title': 'Согласовать с заказчиком', 'hours': 2},
-        {'title': 'Оформить финальную версию', 'hours': 2},
-    ],
-    'дизайн': [
-        {'title': 'Анализ референсов', 'hours': 2},
-        {'title': 'Создание прототипа', 'hours': 4},
-        {'title': 'Отрисовка макетов', 'hours': 6},
-        {'title': 'Согласование', 'hours': 2},
-        {'title': 'Подготовка ассетов', 'hours': 2},
-    ],
-    'аналитика': [
-        {'title': 'Сбор данных', 'hours': 3},
-        {'title': 'Очистка и подготовка', 'hours': 4},
-        {'title': 'Анализ и визуализация', 'hours': 5},
-        {'title': 'Формирование выводов', 'hours': 2},
-    ],
-    'обучение': [
-        {'title': 'Изучить теорию', 'hours': 4},
-        {'title': 'Пройти практику', 'hours': 6},
-        {'title': 'Выполнить проект', 'hours': 8},
-        {'title': 'Подготовить отчёт', 'hours': 2},
-    ],
+    "research": [
+        Subtask(title="Обзор литературы/аналогов", estimatedHours=3.0, order=1),
+        Subtask(title="Формулировка гипотез", estimatedHours=2.0, order=2),
+        Subtask(title="Эксперимент/анализ данных", estimatedHours=6.0, order=3),
+        Subtask(title="Оформление отчёта", estimatedHours=2.5, order=4),
+    ]
 }
 
-def get_template_for_category(category: str) -> list:
-    """Возвращает шаблон подзадач для категории"""
-    return WBS_TEMPLATES.get(category, WBS_TEMPLATES['разработка'])
+DEFAULT_TEMPLATE = [
+    Subtask(title="Подготовка и планирование", estimatedHours=2.0, order=1),
+    Subtask(title="Основная работа", estimatedHours=6.0, order=2),
+    Subtask(title="Проверка и сдача", estimatedHours=2.0, order=3),
+]
 
-def apply_user_speed_factor(subtasks: list, speed_factor: float = 1.0) -> list:
-    """Корректирует оценки времени с учётом speed_factor (Раздел 3.3.1)"""
-    for task in subtasks:
-        if 'hours' in task:
-            # t_оценка = t_базовое ⋅ k_скорости
-            task['estimatedHours'] = round(task['hours'] / speed_factor, 2)
-    return subtasks
+def get_template(category: int | str | None) -> list[Subtask]:
+    # Безопасное приведение к строке для поиска ключевых слов
+    cat_str = str(category).lower() if category is not None else ""
+    if "dev" in cat_str or "разраб" in cat_str: return WBS_TEMPLATES["development"]
+    if "design" in cat_str or "дизайн" in cat_str: return WBS_TEMPLATES["design"]
+    if "research" in cat_str or "исслед" in cat_str: return WBS_TEMPLATES["research"]
+    return DEFAULT_TEMPLATE

@@ -2,3 +2,5 @@
 /__pycache__
 **/__pycache__
 **/__init__.py
+ml_model.pkl
+training_data.csv

@@ -178,8 +178,8 @@ export const tasksApi = {
             userId: taskData.userId || 'user-1',
             category: taskData.category || 'general',
             assignee: taskData.assignee,
-            projectId: taskData.projectId,
             actualDuration: undefined,
+            subtasks: taskData.subtasks || [], // 👈 КРИТИЧНО: сохраняем массив подзадач
         };
 
         // Добавляем копию в локальное хранилище
