@@ -52,7 +52,6 @@ export class WorkLogService implements IWorkLogService {
 
   // Self-finetuning: обновить speedFactor (Раздел 3.3.1)
   async finetuneUser(userId: number) {
-    // Алгоритм из раздела 3.3.1:
     // k_скорости = mean(t_plan / t_fact)
 
     const workLogs = await prisma.workLog.findMany({

@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
-import { fetchTasks, createTask, updateTask } from '@/store/slices/taskSlice';
+import { updateTask, fetchTasksForCalendar, generateSchedule, saveTaskWithSchedule } from '@/store/slices/taskSlice';
 import {
     ChevronLeft,
     ChevronRight,
@@ -13,35 +13,102 @@ import {
     AlertCircle,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Task, Subtask } from '@/types';
+import { Task } from '@/types';
 import CreateTaskModal from '../tasks/CreateTaskModal';
 import CompleteTaskModal from '../tasks/CompleteTaskModal';
 
+// 🔥 Локальный тип для задач с поддержкой parentId (как в БД)
+interface CalendarTask extends Task {
+    parentId?: number | null;
+    subtasks?: CalendarTask[];
+}
+
+// 🔥 Типы для превью и вариантов расписания
+interface PreviewTask extends Task {
+    isPreview: boolean;
+}
+
+interface ScheduleSlot {
+    taskTitle: string;
+    startTime: string;
+    endTime: string;
+    date: string;
+    estimatedHours: number;
+}
+
+interface ScheduleMetrics {
+    totalDays: number;
+    avgLoadPerDay: number;
+    riskScore: number;
+    completionDate: string;
+}
+
+interface ScheduleVariant {
+    id: string;
+    name: string;
+    description: string;
+    slots: ScheduleSlot[];
+    metrics: ScheduleMetrics;
+    confidence: number;
+}
+
+interface GenerateScheduleResult {
+    variants: ScheduleVariant[];
+    recommendedVariantId: string;
+}
+
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
-const SLOT_HEIGHT = 60; // Высота одного часа в пикселях
+const SLOT_HEIGHT = 60;
 
 export default function CalendarView() {
     const dispatch = useAppDispatch();
-
     const { tasks, loading, error, userSpeedFactor, lastMape } = useAppSelector(
         (state) => state.tasks,
     );
 
-    // Состояния для модалок
+    // 🔥 Превью-режим
+    const [previewMode, setPreviewMode] = useState(false);
+    const [previewTasks, setPreviewTasks] = useState<PreviewTask[]>([]);
+    const [selectedVariant, setSelectedVariant] = useState<ScheduleVariant | null>(null);
+    const [availableVariants, setAvailableVariants] = useState<ScheduleVariant[]>([]);
+
+    // 🔥 Состояния модалок
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [isCompleteModalOpen, setIsCompleteModalOpen] = useState(false);
-    const [currentWeek, setCurrentWeek] = useState(new Date(2026, 3, 4));
+
+    const [currentWeek, setCurrentWeek] = useState(new Date());
     const [selectedTask, setSelectedTaskLocal] = useState<Task | null>(null);
     const [editingTask, setEditingTask] = useState<Task | null>(null);
 
-    // Drag-and-Drop state
+    // 🔥 Данные для сохранения превью
+    const [pendingTaskData, setPendingTaskData] = useState<{
+        title: string;
+        description: string;
+        categoryId?: number | null;
+        dueDate?: string;
+    } | null>(null);
+
+    // 🔥 Подсветка при наведении — 🔥 ИСПРАВЛЕНО: number | null
+    const [highlightedTaskId, setHighlightedTaskId] = useState<number | null>(null);
+
+    // Drag-and-Drop
     const [draggedTask, setDraggedTask] = useState<Task | null>(null);
 
-    // Загружаем задачи при монтировании
+    // Загрузка задач при монтировании / смене недели
     useEffect(() => {
-        dispatch(fetchTasks());
-    }, [dispatch]);
+        const weekStart = new Date(currentWeek);
+        weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+
+        dispatch(
+            fetchTasksForCalendar({
+                startDate: weekStart.toISOString(),
+                endDate: weekEnd.toISOString(),
+            })
+        );
+    }, [dispatch, currentWeek]);
 
     // === Навигация ===
     const handlePrevWeek = () => {
@@ -61,7 +128,6 @@ export default function CalendarView() {
     const getWeekDays = () => {
         const startOfWeek = new Date(currentWeek);
         const day = startOfWeek.getDay();
-        // Корректировка, чтобы неделя начиналась с ПН
         const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
         startOfWeek.setDate(diff);
 
@@ -74,31 +140,162 @@ export default function CalendarView() {
 
     const weekDays = getWeekDays();
 
+    // === Данные для рендеринга ===
+    
+    // 1. Основные задачи (для правой панели) — только главные задачи (без parentId)
+    const weekTasks = tasks.filter((task) => {
+        const t = task as CalendarTask;
+        if (t.parentId) return false;
+        
+        const taskStart = new Date(task.startDate);
+        const taskEnd = new Date(task.endDate);
+        const weekStart = new Date(weekDays[0]);
+        const weekEnd = new Date(weekDays[6]);
+        weekEnd.setHours(23, 59, 59, 999);
+        return taskStart <= weekEnd && taskEnd >= weekStart;
+    });
+
+    // 🔥 2. Элементы для календаря (Подзадачи ИЛИ Сами задачи, если подзадач нет)
+    const calendarItems = weekTasks.reduce<CalendarTask[]>((acc, task) => {
+        const t = task as CalendarTask;
+        
+        if (t.subtasks && t.subtasks.length > 0) {
+            const validSubtasks = t.subtasks.filter(
+                (sub): sub is CalendarTask => 
+                    !!(sub as CalendarTask).startDate && !!(sub as CalendarTask).endDate
+            );
+            acc.push(...validSubtasks);
+        } else if (t.startDate && t.endDate) {
+            acc.push(t);
+        }
+        return acc;
+    }, []);
+
+    // 3. Итоговый список для календаря (учитываем превью-режим)
+    const allCalendarItems = previewMode ? previewTasks : calendarItems;
+
     // === Обработчики задач ===
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const handleCreateTask = (taskData: any) => {
-        let duration = 60;
-        if (taskData.startDate && taskData.endDate) {
-            duration =
-                (new Date(taskData.endDate).getTime() -
-                    new Date(taskData.startDate).getTime()) /
-                60000;
+    const handleCreateTask = async (taskData: Partial<Task> & {
+        categoryId?: number | null;
+        variants?: ScheduleVariant[];
+        recommendedVariantId?: string;
+    }) => {
+        if (!taskData.title || !taskData.endDate) {
+            console.error('Missing required fields:', taskData);
+            return;
         }
 
-        const newTaskData: Partial<Task> = {
-            title: taskData.title,
-            description: taskData.description || '',
-            estimatedDuration: duration,
-            startDate: new Date(taskData.startDate).toISOString(),
-            endDate: new Date(taskData.endDate).toISOString(),
-            userId: 'user-1',
-            category: taskData.category || 'general',
-            assignee: taskData.assignee,
-            status: 'todo',
-        };
+        try {
+            let result: GenerateScheduleResult;
 
-        dispatch(createTask(newTaskData));
-        setIsCreateModalOpen(false);
+            if (taskData.variants && taskData.recommendedVariantId) {
+                result = {
+                    variants: taskData.variants,
+                    recommendedVariantId: taskData.recommendedVariantId,
+                };
+            } else {
+                result = (await dispatch(
+                    generateSchedule({
+                        title: taskData.title,
+                        description: taskData.description || '',
+                        subtasks: taskData.subtasks || [],
+                        dueDate: new Date(taskData.endDate).toISOString().split('T')[0],
+                        onlyWeekdays: false,
+                    })
+                ).unwrap()) as GenerateScheduleResult;
+            }
+
+            const recommendedVariant = result.variants.find(
+                (v) => v.id === result.recommendedVariantId
+            ) || result.variants[0];
+
+            setPendingTaskData({
+                title: taskData.title,
+                description: taskData.description || '',
+                categoryId: taskData.categoryId ?? undefined,
+                dueDate: new Date(taskData.endDate).toISOString().split('T')[0],
+            });
+
+            setAvailableVariants(result.variants);
+            updatePreviewFromVariant(recommendedVariant);
+
+            setSelectedVariant(recommendedVariant);
+            setPreviewMode(true);
+            setIsCreateModalOpen(false);
+        } catch (err) {
+            console.error('Ошибка генерации расписания:', err);
+        }
+    };
+
+    const updatePreviewFromVariant = (variant: ScheduleVariant) => {
+        const tasksForPreview: PreviewTask[] = variant.slots.map((slot, idx) => ({
+            // 🔥 Отрицательный number для превью, чтобы не конфликтовал с БД
+            id: -Date.now() - idx,
+            title: slot.taskTitle,
+            description: '',
+            startDate: new Date(`${slot.date}T${slot.startTime}`).toISOString(),
+            endDate: new Date(`${slot.date}T${slot.endTime}`).toISOString(),
+            estimatedDuration: Math.round(slot.estimatedHours * 60),
+            status: 'todo',
+            userId: 1, // 🔥 number вместо 'user-1'
+            category: 'general',
+            isPreview: true,
+            subtasks: [],
+        }));
+        setPreviewTasks(tasksForPreview);
+    };
+
+    const handleVariantChange = (variantId: string) => {
+        const variant = availableVariants.find((v) => v.id === variantId);
+        if (variant) {
+            setSelectedVariant(variant);
+            updatePreviewFromVariant(variant);
+        }
+    };
+
+    const handleSavePreview = async () => {
+        if (!selectedVariant || !pendingTaskData) return;
+
+        try {
+            const subtasks = selectedVariant.slots.map((slot) => ({
+                title: slot.taskTitle,
+                estimatedHours: slot.estimatedHours,
+                startDate: new Date(`${slot.date}T${slot.startTime}`).toISOString(),
+                endDate: new Date(`${slot.date}T${slot.endTime}`).toISOString(),
+            }));
+
+            const weekStart = new Date(currentWeek);
+            weekStart.setDate(weekStart.getDate() - weekStart.getDay() + 1);
+            const weekEnd = new Date(weekStart);
+            weekEnd.setDate(weekEnd.getDate() + 6);
+
+            await dispatch(
+                saveTaskWithSchedule({
+                    title: pendingTaskData.title,
+                    description: pendingTaskData.description,
+                    categoryId: pendingTaskData.categoryId ?? undefined,
+                    subtasks,
+                    dueDate: pendingTaskData.dueDate || '',
+                    startDate: subtasks[0]?.startDate,
+                    endDate: subtasks[subtasks.length - 1]?.endDate,
+                })
+            );
+
+            setPreviewMode(false);
+            setPreviewTasks([]);
+            setPendingTaskData(null);
+            setSelectedVariant(null);
+            setAvailableVariants([]);
+
+            dispatch(
+                fetchTasksForCalendar({
+                    startDate: weekStart.toISOString(),
+                    endDate: weekEnd.toISOString(),
+                })
+            );
+        } catch (err) {
+            console.error('Ошибка сохранения:', err);
+        }
     };
 
     const handleTaskClick = (task: Task) => {
@@ -129,8 +326,7 @@ export default function CalendarView() {
 
     const handleDrop = (e: React.DragEvent, dayIndex: number, hour: number) => {
         e.preventDefault();
-        if (!draggedTask || !draggedTask.startDate || !draggedTask.endDate)
-            return;
+        if (!draggedTask || !draggedTask.startDate || !draggedTask.endDate) return;
 
         const oldStart = new Date(draggedTask.startDate);
         const oldEnd = new Date(draggedTask.endDate);
@@ -145,12 +341,13 @@ export default function CalendarView() {
 
         dispatch(
             updateTask({
+                // 🔥 draggedTask.id уже number
                 taskId: draggedTask.id,
                 updates: {
                     startDate: newDate.toISOString(),
                     endDate: newEnd.toISOString(),
                 },
-            }),
+            })
         );
         setDraggedTask(null);
     };
@@ -163,29 +360,22 @@ export default function CalendarView() {
     };
 
     // === Вспомогательные функции ===
-    const getTaskColor = (task: Task) => {
+    const getTaskColor = (task: Task & { isPreview?: boolean }) => {
+        if (task.isPreview) return 'bg-blue-500 opacity-40 hover:opacity-60 border-2 border-dashed border-blue-300';
         if (task.status === 'done') return 'bg-gray-400 opacity-60';
         if (task.status === 'in_progress') return 'bg-blue-500';
         return 'bg-purple-500';
     };
 
-    // Фильтр задач для текущей недели
-    // Фильтр задач: показываем задачи, которые ПЕРЕСЕКАЮТСЯ с текущей неделей
-    const weekTasks = tasks.filter((task) => {
-        const taskStart = new Date(task.startDate);
-        const taskEnd = new Date(task.endDate);
-        const weekStart = new Date(weekDays[0]);
-        const weekEnd = new Date(weekDays[6]);
-        weekEnd.setHours(23, 59, 59, 999);
+    const getRiskBadgeColor = (riskScore: number) => {
+        if (riskScore < 0.3) return 'bg-green-100 text-green-800';
+        if (riskScore < 0.6) return 'bg-yellow-100 text-yellow-800';
+        return 'bg-red-100 text-red-800';
+    };
 
-        // Задача пересекается с неделей, если:
-        // (начало задачи <= конец недели) И (конец задачи >= начало недели)
-        return taskStart <= weekEnd && taskEnd >= weekStart;
-    });
-
-    // === Рендеринг сегмента задачи для конкретного дня ===
+    // === Рендеринг сегмента задачи ===
     const renderTaskSegment = (
-        task: Task,
+        task: Task & { isPreview?: boolean },
         dayDate: Date,
         dayIndex: number,
         segmentIndex: number,
@@ -193,30 +383,28 @@ export default function CalendarView() {
     ) => {
         const taskStart = new Date(task.startDate);
         const taskEnd = new Date(task.endDate);
-
-        // Определяем границы сегмента для этого дня
         const dayStart = new Date(dayDate);
         dayStart.setHours(0, 0, 0, 0);
         const dayEnd = new Date(dayDate);
         dayEnd.setHours(23, 59, 59, 999);
 
-        // Начало сегмента: либо старт задачи, либо начало дня
         const segmentStart = taskStart > dayStart ? taskStart : dayStart;
-        // Конец сегмента: либо конец задачи, либо конец дня
         const segmentEnd = taskEnd < dayEnd ? taskEnd : dayEnd;
 
-        // Расчет позиции
         const startHour = segmentStart.getHours();
         const startMinutes = segmentStart.getMinutes();
-        const durationHours =
-            (segmentEnd.getTime() - segmentStart.getTime()) / (1000 * 60 * 60);
+        const durationHours = (segmentEnd.getTime() - segmentStart.getTime()) / (1000 * 60 * 60);
 
         const topPx = (startHour + startMinutes / 60) * SLOT_HEIGHT;
-        const heightPx = Math.max(durationHours * SLOT_HEIGHT, 24); // Мин. высота для видимости
+        const heightPx = Math.max(durationHours * SLOT_HEIGHT, 24);
 
-        // Скругление углов для визуальной целостности
         const isFirst = segmentIndex === 0;
         const isLast = segmentIndex === totalSegments - 1;
+
+        // 🔥 Определяем целевой ID для подсветки (оба number)
+        const taskWithParent = task as CalendarTask;
+        const targetId = taskWithParent.parentId ?? task.id;
+        const isHighlighted = highlightedTaskId !== null && targetId === highlightedTaskId;
 
         return (
             <div
@@ -226,11 +414,11 @@ export default function CalendarView() {
                 onDragEnd={handleDragEnd}
                 onClick={() => handleTaskClick(task)}
                 onContextMenu={(e) => handleTaskContextMenu(e, task)}
-                className={`absolute ${getTaskColor(task)} text-white p-2 rounded-md text-xs overflow-hidden cursor-pointer hover:opacity-90 transition-opacity shadow-sm group z-10 ${
-                    task.status === 'done'
-                        ? 'cursor-not-allowed opacity-60'
-                        : ''
-                }`}
+                onMouseEnter={() => setHighlightedTaskId(targetId)}
+                onMouseLeave={() => setHighlightedTaskId(null)}
+                className={`absolute ${getTaskColor(task)} text-white p-2 rounded-md text-xs overflow-hidden cursor-pointer hover:opacity-90 transition-all shadow-sm group z-10 ${
+                    task.status === 'done' ? 'cursor-not-allowed opacity-60' : ''
+                } ${isHighlighted ? 'ring-2 ring-yellow-400 shadow-lg z-20 scale-[1.02]' : ''}`}
                 style={{
                     left: `calc(${(dayIndex / 7) * 100}% + 4px)`,
                     top: `${topPx}px`,
@@ -242,26 +430,25 @@ export default function CalendarView() {
                     borderBottomRightRadius: isLast ? '0.375rem' : '0',
                 }}
             >
-                {/* Заголовок показываем только в первом сегменте */}
                 {isFirst && (
                     <div className='font-semibold truncate flex items-center gap-1'>
                         {task.title}
+                        {task.isPreview && (
+                            <span className='text-[9px] bg-blue-200 text-blue-800 px-1 rounded ml-1'>ПРЕВЬЮ</span>
+                        )}
                     </div>
                 )}
-
-                {/* Время показываем в первом и последнем сегменте */}
                 {(isFirst || isLast) && (
                     <div className='opacity-90 flex items-center gap-1 mt-0.5 text-[10px]'>
                         <Clock className='w-3 h-3' />
                         {segmentStart.getHours().toString().padStart(2, '0')}:
                         {segmentStart.getMinutes().toString().padStart(2, '0')}
-                        {totalSegments > 1 && (isFirst ? '-...' : '...-')}
+                        {totalSegments > 1 && (isFirst ? ' -... ' : ' ...- ')}
+                        {totalSegments === 1 && ' - '}
                         {segmentEnd.getHours().toString().padStart(2, '0')}:
                         {segmentEnd.getMinutes().toString().padStart(2, '0')}
                     </div>
                 )}
-
-                {/* Якорь на подзадачи */}
                 {isFirst && task.subtasks && task.subtasks.length > 0 && (
                     <div className='text-[10px] opacity-75 mt-1 flex items-center gap-1'>
                         <CheckCircle className='w-3 h-3' />
@@ -278,119 +465,106 @@ export default function CalendarView() {
             <div className='flex items-center justify-between px-6 py-4 border-b border-gray-200 dark:border-gray-800'>
                 <div className='flex items-center gap-4'>
                     <div className='flex items-center gap-1'>
-                        <Button
-                            variant='outline'
-                            size='icon'
-                            onClick={handlePrevWeek}
-                        >
+                        <Button variant='outline' size='icon' onClick={handlePrevWeek}>
                             <ChevronLeft className='w-5 h-5' />
                         </Button>
-                        <Button
-                            variant='outline'
-                            size='icon'
-                            onClick={handleNextWeek}
-                        >
+                        <Button variant='outline' size='icon' onClick={handleNextWeek}>
                             <ChevronRight className='w-5 h-5' />
                         </Button>
                     </div>
-                    <Button
-                        variant='outline'
-                        onClick={handleToday}
-                        className='text-sm'
-                    >
+                    <Button variant='outline' onClick={handleToday} className='text-sm'>
                         Сегодня
                     </Button>
                     <h2 className='text-lg font-semibold text-gray-900 dark:text-gray-100'>
-                        {weekDays[0].toLocaleDateString('ru-RU', {
-                            day: 'numeric',
-                            month: 'long',
-                        })}{' '}
+                        {weekDays[0].toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' })}{' '}
                         –{' '}
-                        {weekDays[6].toLocaleDateString('ru-RU', {
-                            day: 'numeric',
-                            month: 'long',
-                            year: 'numeric',
-                        })}
+                        {weekDays[6].toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' })}
                     </h2>
                 </div>
 
-                {/* Метрики Self-finetuning */}
                 {lastMape !== null && (
                     <div className='hidden md:flex items-center gap-2 text-xs text-green-700 bg-green-100 px-3 py-1.5 rounded-lg border border-green-200'>
                         <CheckCircle className='w-4 h-4 text-green-600' />
                         <span className='font-medium'>Система обучается:</span>
                         <span>Точность {(100 - lastMape).toFixed(1)}%</span>
-                        <span className='text-green-800 font-bold'>
-                            (k={userSpeedFactor.toFixed(2)})
-                        </span>
+                        <span className='text-green-800 font-bold'>(k={userSpeedFactor.toFixed(2)})</span>
                     </div>
                 )}
 
-                <Button
-                    onClick={() => {
-                        setEditingTask(null);
-                        setIsCreateModalOpen(true);
-                    }}
-                    className='flex items-center gap-2 bg-blue-600 hover:bg-blue-700'
-                >
-                    <Plus className='w-5 h-5' />
-                    Создать задачу
+                {/* Превью-панель с выбором варианта */}
+                {previewMode && selectedVariant && availableVariants.length > 0 && (
+                    <div className='flex flex-col gap-3 px-6 py-3 bg-blue-50 dark:bg-blue-900/20 border-b border-blue-200 dark:border-blue-800'>
+                        <div className='flex items-center gap-2 flex-wrap'>
+                            <span className='text-sm font-medium text-gray-700 dark:text-gray-300 mr-2'>Вариант:</span>
+                            {availableVariants.map((variant) => (
+                                <Button
+                                    key={variant.id}
+                                    variant={selectedVariant.id === variant.id ? 'default' : 'outline'}
+                                    size='sm'
+                                    onClick={() => handleVariantChange(variant.id)}
+                                    className={selectedVariant.id === variant.id 
+                                        ? 'bg-blue-600 hover:bg-blue-700' 
+                                        : 'hover:bg-blue-100 dark:hover:bg-blue-900/30'
+                                    }
+                                >
+                                    {variant.name}
+                                    {variant.id === (availableVariants.find(v => v.confidence === Math.max(...availableVariants.map(v => v.confidence)))?.id) && '⭐'}
+                                </Button>
+                            ))}
+                        </div>
+                        <div className='flex items-center gap-4 flex-wrap'>
+                            <span className='text-sm text-gray-700 dark:text-gray-300'>{selectedVariant.description}</span>
+                            <div className='flex gap-3 text-sm'>
+                                <span className='text-gray-600 dark:text-gray-400'>📅 {selectedVariant.metrics.totalDays} дн.</span>
+                                <span className='text-gray-600 dark:text-gray-400'>⏱️ {selectedVariant.metrics.avgLoadPerDay.toFixed(1)} ч/день</span>
+                                <span className={`px-2 py-1 rounded ${getRiskBadgeColor(selectedVariant.metrics.riskScore)}`}>
+                                    ⚠️ {(selectedVariant.metrics.riskScore * 100).toFixed(0)}% риск
+                                </span>
+                            </div>
+                        </div>
+                        <div className='flex gap-2 ml-auto'>
+                            <Button variant='outline' onClick={() => {
+                                setPreviewMode(false); setPreviewTasks([]); setPendingTaskData(null);
+                                setSelectedVariant(null); setAvailableVariants([]);
+                            }} size='sm'>✕ Отменить</Button>
+                            <Button onClick={handleSavePreview} className='bg-green-600 hover:bg-green-700' size='sm'>✓ Сохранить</Button>
+                        </div>
+                    </div>
+                )}
+
+                <Button onClick={() => { setEditingTask(null); setIsCreateModalOpen(true); }} className='flex items-center gap-2 bg-blue-600 hover:bg-blue-700'>
+                    <Plus className='w-5 h-5' /> Создать задачу
                 </Button>
             </div>
 
-            {/* Error Banner */}
             {error && (
                 <div className='bg-red-50 border-l-4 border-red-500 text-red-700 p-4 flex items-center gap-2'>
-                    <AlertCircle className='w-5 h-5' />
-                    <p>{error}</p>
+                    <AlertCircle className='w-5 h-5' /><p>{error}</p>
                 </div>
             )}
 
-            {/* Основной контент: Календарь + Сайдбар */}
+            {/* Основной контент */}
             <div className='flex-1 overflow-hidden flex'>
-                {/* Область календаря */}
+                {/* Календарь */}
                 <div className='flex-1 overflow-auto relative'>
                     <div className='flex min-w-250'>
-                        {/* Колонка времени */}
                         <div className='w-16 shrink-0 border-r border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950 sticky left-0 z-20'>
                             <div className='h-12 border-b border-gray-200 dark:border-gray-800' />
                             {HOURS.map((hour) => (
-                                <div
-                                    key={hour}
-                                    className='h-15 text-[10px] text-gray-500 dark:text-gray-400 text-right pr-2 pt-1'
-                                >
+                                <div key={hour} className='h-15 text-[10px] text-gray-500 dark:text-gray-400 text-right pr-2 pt-1'>
                                     {hour.toString().padStart(2, '0')}:00
                                 </div>
                             ))}
                         </div>
 
-                        {/* Сетка дней */}
                         <div className='flex-1'>
-                            {/* Шапка дней */}
                             <div className='grid grid-cols-7 border-b border-gray-200 dark:border-gray-800 sticky top-0 z-20 bg-white dark:bg-gray-950'>
                                 {weekDays.map((day, index) => {
-                                    const isToday =
-                                        new Date().toDateString() ===
-                                        day.toDateString();
+                                    const isToday = new Date().toDateString() === day.toDateString();
                                     return (
-                                        <div
-                                            key={index}
-                                            className={`h-12 flex flex-col items-center justify-center border-l border-gray-200 dark:border-gray-800 ${
-                                                isToday
-                                                    ? 'bg-blue-50 dark:bg-blue-900/20'
-                                                    : ''
-                                            }`}
-                                        >
-                                            <span className='text-xs text-gray-500 dark:text-gray-400'>
-                                                {DAYS[index]}
-                                            </span>
-                                            <span
-                                                className={`text-lg font-semibold ${
-                                                    isToday
-                                                        ? 'text-blue-600 dark:text-blue-400'
-                                                        : 'text-gray-900 dark:text-gray-100'
-                                                }`}
-                                            >
+                                        <div key={index} className={`h-12 flex flex-col items-center justify-center border-l border-gray-200 dark:border-gray-800 ${isToday ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}>
+                                            <span className='text-xs text-gray-500 dark:text-gray-400'>{DAYS[index]}</span>
+                                            <span className={`text-lg font-semibold ${isToday ? 'text-blue-600 dark:text-blue-400' : 'text-gray-900 dark:text-gray-100'}`}>
                                                 {day.getDate()}
                                             </span>
                                         </div>
@@ -398,51 +572,28 @@ export default function CalendarView() {
                                 })}
                             </div>
 
-                            {/* Слоты и Задачи */}
-                            <div
-                                className='grid grid-cols-7 relative'
-                                onDragOver={(e) => e.preventDefault()}
-                            >
-                                {/* Фон (сетка) */}
+                            <div className='grid grid-cols-7 relative' onDragOver={(e) => e.preventDefault()}>
                                 {weekDays.map((_, dayIndex) => (
-                                    <div
-                                        key={dayIndex}
-                                        className='border-l border-gray-200 dark:border-gray-800'
-                                    >
+                                    <div key={dayIndex} className='border-l border-gray-200 dark:border-gray-800'>
                                         {HOURS.map((hour) => (
                                             <div
                                                 key={hour}
                                                 className='h-15 border-b border-gray-200 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-900/50 transition-colors'
-                                                data-day={dayIndex}
-                                                data-hour={hour}
-                                                onDragOver={(e) =>
-                                                    e.preventDefault()
-                                                }
-                                                onDrop={(e) =>
-                                                    handleDrop(
-                                                        e,
-                                                        dayIndex,
-                                                        hour,
-                                                    )
-                                                }
+                                                onDragOver={(e) => e.preventDefault()}
+                                                onDrop={(e) => handleDrop(e, dayIndex, hour)}
                                             />
                                         ))}
                                     </div>
                                 ))}
 
-                                {/* Задачи (Overlay) */}
                                 {loading ? (
                                     <div className='absolute inset-0 flex items-center justify-center bg-white/80 dark:bg-gray-950/80 z-20'>
                                         <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600' />
                                     </div>
                                 ) : (
-                                    weekTasks.map((task) => {
-                                        const taskStart = new Date(
-                                            task.startDate,
-                                        );
+                                    allCalendarItems.map((task) => {
+                                        const taskStart = new Date(task.startDate);
                                         const taskEnd = new Date(task.endDate);
-
-                                        // Генерируем массив дней, которые покрывает задача
                                         const daysInRange: Date[] = [];
                                         const current = new Date(taskStart);
                                         current.setHours(0, 0, 0, 0);
@@ -451,38 +602,24 @@ export default function CalendarView() {
 
                                         while (current <= end) {
                                             daysInRange.push(new Date(current));
-                                            current.setDate(
-                                                current.getDate() + 1,
-                                            );
+                                            current.setDate(current.getDate() + 1);
                                         }
 
-                                        // Рендерим сегмент для каждого дня из диапазона
-                                        return daysInRange
-                                            .map((dayDate, segmentIndex) => {
-                                                // Проверяем, что день входит в текущую видимую неделю
-                                                const isDayInView =
-                                                    weekDays.some(
-                                                        (d) =>
-                                                            d.toDateString() ===
-                                                            dayDate.toDateString(),
-                                                    );
-                                                if (!isDayInView) return null;
+                                        return daysInRange.map((dayDate, segmentIndex) => {
+                                            const isDayInView = weekDays.some((d) => d.toDateString() === dayDate.toDateString());
+                                            if (!isDayInView) return null;
 
-                                                // Вычисляем индекс колонки (0-6)
-                                                let dayIndex =
-                                                    dayDate.getDay() - 1;
-                                                if (dayIndex === -1)
-                                                    dayIndex = 6;
+                                            let dayIndex = dayDate.getDay() - 1;
+                                            if (dayIndex === -1) dayIndex = 6;
 
-                                                return renderTaskSegment(
-                                                    task,
-                                                    dayDate,
-                                                    dayIndex,
-                                                    segmentIndex,
-                                                    daysInRange.length,
-                                                );
-                                            })
-                                            .filter(Boolean);
+                                            return renderTaskSegment(
+                                                task as Task & { isPreview?: boolean },
+                                                dayDate,
+                                                dayIndex,
+                                                segmentIndex,
+                                                daysInRange.length,
+                                            );
+                                        }).filter(Boolean);
                                     })
                                 )}
                             </div>
@@ -490,70 +627,63 @@ export default function CalendarView() {
                     </div>
                 </div>
 
-                {/* ✅ Сайдбар подзадач (справа) */}
+                {/* 🔥 Правая панель: ГЛАВНЫЕ ЗАДАЧИ */}
                 <div className='w-80 border-l border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900 flex flex-col z-30 shadow-xl'>
                     <div className='p-4 border-b border-gray-200 dark:border-gray-800 bg-white dark:bg-gray-950'>
-                        <h3 className='text-sm font-bold uppercase text-gray-500 tracking-wider'>
-                            Подзадачи недели
-                        </h3>
+                        <h3 className='text-sm font-bold uppercase text-gray-500 tracking-wider'>Задачи недели</h3>
                     </div>
 
                     <div className='flex-1 overflow-y-auto p-4 space-y-3'>
                         {weekTasks.length === 0 ? (
-                            <div className='text-center text-gray-400 text-sm mt-10'>
-                                Нет активных задач
-                            </div>
+                            <div className='text-center text-gray-400 text-sm mt-10'>Нет активных задач</div>
                         ) : (
-                            weekTasks.flatMap(
-                                (task) =>
-                                    task.subtasks?.map((subtask: Subtask) => (
-                                        <div
-                                            key={subtask.id}
-                                            className='group p-3 bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 hover:border-blue-400 dark:hover:border-blue-500 transition-colors shadow-sm'
-                                        >
-                                            <div className='flex items-start justify-between gap-2'>
-                                                <div className='flex-1 min-w-0'>
-                                                    <div className='text-sm font-medium text-gray-900 dark:text-gray-100 truncate'>
-                                                        {subtask.title}
-                                                    </div>
-                                                    {/* Якорь на родителя */}
-                                                    <div
-                                                        className='text-xs text-gray-500 mt-1 truncate cursor-pointer hover:text-blue-600 flex items-center gap-1'
-                                                        onClick={() =>
-                                                            handleTaskClick(
-                                                                task,
-                                                            )
-                                                        }
-                                                    >
-                                                        ← {task.title}
-                                                    </div>
-                                                    <div className='text-[10px] text-gray-400 mt-1 flex items-center gap-1'>
-                                                        <Clock className='w-3 h-3' />
-                                                        {Math.round(
-                                                            subtask.estimatedDuration /
-                                                                60,
-                                                        )}{' '}
-                                                        ч
-                                                    </div>
-                                                </div>
-                                                <div
-                                                    className={`w-2.5 h-2.5 rounded-full shrink-0 mt-1.5 ${
-                                                        subtask.status ===
-                                                        'done'
-                                                            ? 'bg-green-500'
-                                                            : 'bg-blue-500'
-                                                    }`}
-                                                    title={
-                                                        subtask.status ===
-                                                        'done'
-                                                            ? 'Выполнено'
-                                                            : 'В работе'
-                                                    }
-                                                />
+                            weekTasks.map((task) => {
+                                const completedSubtasks = task.subtasks?.filter(s => s.status === 'done').length || 0;
+                                const totalSubtasks = task.subtasks?.length || 0;
+                                const progress = totalSubtasks > 0 ? (completedSubtasks / totalSubtasks) * 100 : 0;
+
+                                return (
+                                    <div
+                                        key={task.id}
+                                        // 🔥 task.id — number, highlightedTaskId — тоже number
+                                        onMouseEnter={() => setHighlightedTaskId(task.id)}
+                                        onMouseLeave={() => setHighlightedTaskId(null)}
+                                        className={`group p-3 bg-white dark:bg-gray-800 rounded-lg border transition-all cursor-pointer ${
+                                            highlightedTaskId === task.id
+                                                ? 'border-blue-500 ring-2 ring-blue-400 shadow-md'
+                                                : 'border-gray-200 dark:border-gray-700 hover:border-blue-400'
+                                        }`}
+                                    >
+                                        <div className='flex items-center justify-between mb-1'>
+                                            <span className='text-sm font-medium truncate flex-1 mr-2'>{task.title}</span>
+                                            <span className='text-xs font-mono text-gray-500'>
+                                                {task.subtasks?.length ? `${completedSubtasks}/${totalSubtasks}` : '—'}
+                                            </span>
+                                        </div>
+                                        <p className='text-xs text-gray-500 line-clamp-2 mb-2'>{task.description || 'Без описания'}</p>
+                                        
+                                        {totalSubtasks > 0 && (
+                                            <div className='w-full bg-gray-200 dark:bg-gray-700 rounded-full h-1.5 mb-2'>
+                                                <div className='bg-blue-500 h-1.5 rounded-full transition-all' style={{ width: `${progress}%` }} />
+                                            </div>
+                                        )}
+
+                                        <div className='flex items-center justify-between text-xs text-gray-400'>
+                                            <div className='flex items-center gap-1'>
+                                                <Clock className='w-3 h-3' />
+                                                {Math.round((task.estimatedDuration || 0) / 60)} ч всего
+                                            </div>
+                                            <div className={`px-2 py-0.5 rounded text-[10px] ${
+                                                task.status === 'done' ? 'bg-green-100 text-green-700' :
+                                                task.status === 'in_progress' ? 'bg-blue-100 text-blue-700' :
+                                                'bg-gray-100 text-gray-600'
+                                            }`}>
+                                                {task.status === 'done' ? 'Готово' : task.status === 'in_progress' ? 'В работе' : 'План'}
                                             </div>
                                         </div>
-                                    )) || [],
-                            )
+                                    </div>
+                                );
+                            })
                         )}
                     </div>
                 </div>
@@ -562,20 +692,14 @@ export default function CalendarView() {
             {/* Модалки */}
             <CreateTaskModal
                 isOpen={isCreateModalOpen}
-                onClose={() => {
-                    setIsCreateModalOpen(false);
-                    setEditingTask(null);
-                }}
+                onClose={() => { setIsCreateModalOpen(false); setEditingTask(null); }}
                 task={editingTask}
                 onSubmit={handleCreateTask}
             />
             <CompleteTaskModal
                 task={selectedTask}
                 isOpen={isCompleteModalOpen}
-                onClose={() => {
-                    setIsCompleteModalOpen(false);
-                    setSelectedTaskLocal(null);
-                }}
+                onClose={() => { setIsCompleteModalOpen(false); setSelectedTaskLocal(null); }}
             />
         </div>
     );

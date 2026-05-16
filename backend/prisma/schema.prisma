@@ -86,9 +86,12 @@ model Task {
   // Раздел 3.3.1: Оценка времени (План / Факт)
   estimatedHours Float?
   actualHours    Float?
+  estimatedDuration Float?    // Длительность в минутах (для календаря)
   
   // Планирование и сроки
   dueDate        DateTime?
+  startDate      DateTime?   // Запланированное начало
+  endDate        DateTime?   // Запланированное окончание
   completedAt    DateTime?
   
   // Раздел 2.1.3: Декомпозиция (WBS — иерархия подзадач)

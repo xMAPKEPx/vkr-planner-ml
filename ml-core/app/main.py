@@ -1,7 +1,7 @@
 # ml-core/main.py
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from datetime import date
+from datetime import date, timedelta
 from app.models.schemas import (
     DecompositionRequest, DecompositionResponse,
     ScheduleGenerationRequest, ScheduleGenerationResponse
@@ -56,6 +56,63 @@ def generate_schedule(request: ScheduleGenerationRequest):
             generationMethod="multi-strategy",
         )
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# 🔥 НОВОЕ: Генерация расписания с учетом существующих задач
+@app.post("/schedule/generate-with-existing", response_model=ScheduleGenerationResponse)
+def generate_schedule_with_existing(request: dict):
+    try:
+        from datetime import datetime
+        
+        title = request.get('title', '')
+        description = request.get('description', '')
+        subtasks = request.get('subtasks', [])
+        due_date_str = request.get('dueDate')
+        existing_tasks = request.get('existingTasks', [])
+        speed_factor = request.get('userSpeedFactor', 1.0)
+        only_weekdays = request.get('onlyWeekdays', False)
+        work_start = request.get('workingHours', {}).get('start', 9)
+        work_end = request.get('workingHours', {}).get('end', 18)
+        min_break = request.get('minBreakMinutes', 15)
+        
+        # Парсим даты
+        start_date = date.today()
+        due_date = datetime.fromisoformat(due_date_str).date() if due_date_str else date.today() + timedelta(days=7)
+        
+        # Преобразуем subtasks в объекты Subtask
+        from app.models.schemas import Subtask as SubtaskModel
+        subtask_objs = [
+            SubtaskModel(
+                title=s.get('title', ''),
+                description=s.get('description'),
+                estimatedHours=s.get('estimatedHours', 2.0),
+                order=i
+            )
+            for i, s in enumerate(subtasks)
+        ]
+        
+        variants = scheduler.generate_all_variants_with_existing(
+            subtasks=subtask_objs,
+            start_date=start_date,
+            due_date=due_date,
+            existing_tasks=existing_tasks,
+            speed_factor=speed_factor,
+            only_weekdays=only_weekdays,
+            work_start=work_start,
+            work_end=work_end,
+            min_break=min_break
+        )
+        
+        recommended_id = scheduler.recommend_variant(variants)
+        
+        return ScheduleGenerationResponse(
+            variants=variants,
+            recommendedVariantId=recommended_id,
+            generationMethod="with-existing-conflicts",
+        )
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 # 🔥 НОВЫЙ ЭНДПОИНТ: Self-finetuning (п. 3.3.1 ВКР)

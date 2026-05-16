@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { register, login, getProfile } from '../controllers/auth.controller';
-import { createTask, getTasks, updateTask, deleteTask, decomposeTask } from '../controllers/task.controller';
+import { createTask, getTasks, updateTask, deleteTask, decomposeTask, getTasksForCalendar, generateScheduleWithExisting, saveTaskWithSchedule } from '../controllers/task.controller';
 import { createWorkLog, getWorkLogs, finetuneUser } from '../controllers/worklog.controller';
 import { generateSchedule, acceptSchedule, getStrategies } from '../controllers/schedule.controller';
 import { authMiddleware } from '../middleware/auth';
@@ -15,9 +15,14 @@ router.get('/auth/profile', authMiddleware, getProfile);
 // Tasks
 router.post('/tasks', authMiddleware, createTask);
 router.get('/tasks', authMiddleware, getTasks);
+router.get('/tasks/calendar', authMiddleware, getTasksForCalendar);
 router.put('/tasks/:id', authMiddleware, updateTask);
 router.delete('/tasks/:id', authMiddleware, deleteTask);
 router.post('/tasks/:id/decompose', authMiddleware, decomposeTask);
+
+// Schedule Generation with Existing Tasks
+router.post('/tasks/schedule/generate-with-existing', authMiddleware, generateScheduleWithExisting);
+router.post('/tasks/schedule/save', authMiddleware, saveTaskWithSchedule);
 
 // Schedule
 router.post('/tasks/:id/schedule/generate', authMiddleware, generateSchedule);

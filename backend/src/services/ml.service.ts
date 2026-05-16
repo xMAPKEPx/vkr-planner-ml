@@ -58,6 +58,53 @@ export class MLService {
     }
   }
 
+  // 🔥 НОВОЕ: Генерация расписания с учетом существующих задач
+  async generateScheduleWithExisting(
+    title: string,
+    description: string,
+    subtasks: any[],
+    existingTasks: any[],
+    dueDate: string,
+    speedFactor: number = 1.0,
+    onlyWeekdays: boolean = false
+  ): Promise<any> {
+    try {
+      // Преобразуем существующие задачи в формат для ML-Core
+      const existingSchedule = existingTasks
+        .filter((t: any) => t.startDate && t.endDate)
+        .map((t: any) => ({
+          startDate: t.startDate,
+          endDate: t.endDate,
+          title: t.title,
+        }));
+
+      const response = await axios.post(
+        `${ML_CORE_URL}/schedule/generate-with-existing`,
+        {
+          title,
+          description,
+          subtasks: subtasks || [],
+          dueDate,
+          userSpeedFactor: speedFactor,
+          existingTasks: existingSchedule,
+          onlyWeekdays,
+          workingHours: { start: 9, end: 18 }, // 9 AM to 6 PM
+          minBreakMinutes: 15,
+        }
+      );
+
+      return response.data;
+    } catch (error: any) {
+      console.error('ML-Core schedule error:', error.message);
+      
+      // Fallback: базовое расписание
+      return {
+        variants: [],
+        error: 'Не удалось сгенерировать расписание',
+      };
+    }
+  }
+
   // Проверка доступности ML-Core
   async checkHealth(): Promise<boolean> {
     try {

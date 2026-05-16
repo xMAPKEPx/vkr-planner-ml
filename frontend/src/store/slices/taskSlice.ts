@@ -19,7 +19,7 @@ const initialState: TaskState = {
     loading: false,
     error: null,
     selectedTask: null,
-    userSpeedFactor: 1.0, // k_скорости по умолчанию
+    userSpeedFactor: 1.0,
     lastMape: null,
 };
 
@@ -49,11 +49,10 @@ export const createTask = createAsyncThunk<Task, Partial<Task>>(
     },
 );
 
-// 3. Обновление задачи (ВАЖНО: Нужно для Drag-and-Drop и редактирования)
-// Реализует сценарий "Корректировка плана" (ВКР 1.4.2.3)
+// 3. Обновление задачи — 🔥 ИСПРАВЛЕНО: taskId: number
 export const updateTask = createAsyncThunk<
     Task,
-    { taskId: string; updates: Partial<Task> }
+    { taskId: number; updates: Partial<Task> }
 >('tasks/update', async ({ taskId, updates }, { rejectWithValue }) => {
     try {
         return await tasksApi.update(taskId, updates);
@@ -62,20 +61,25 @@ export const updateTask = createAsyncThunk<
     }
 });
 
-// 4. Завершение задачи (WorkLog для self-finetuning)
+// 4. Завершение задачи — 🔥 ИСПРАВЛЕНО: тип возврата
 export const completeTask = createAsyncThunk<
-    { taskId: string; newSpeedFactor?: number; mape?: number },
+    { taskId: number; newSpeedFactor?: number; mape?: number }, // 🔥 taskId: number
     WorkLogEntry
 >('tasks/complete', async (workLog, { rejectWithValue }) => {
     try {
-        return await tasksApi.complete(workLog);
+        const response = await tasksApi.complete(workLog);
+        return {
+            taskId: response.taskId, // уже number
+            newSpeedFactor: response.newSpeedFactor,
+            mape: response.mape,
+        };
     } catch (error: any) {
         return rejectWithValue(error.message || 'Ошибка завершения задачи');
     }
 });
 
-// 5. Удаление задачи
-export const deleteTask = createAsyncThunk<string, string>(
+// 5. Удаление задачи — 🔥 ИСПРАВЛЕНО: number
+export const deleteTask = createAsyncThunk<number, number>(
     'tasks/delete',
     async (taskId, { rejectWithValue }) => {
         try {
@@ -86,6 +90,76 @@ export const deleteTask = createAsyncThunk<string, string>(
         }
     },
 );
+
+// 6. Загрузка задач для календаря из БД
+export const fetchTasksForCalendar = createAsyncThunk<
+    Task[],
+    { startDate?: string; endDate?: string }
+>(
+    'tasks/fetchForCalendar',
+    async ({ startDate, endDate }, { rejectWithValue }) => {
+        try {
+            const result = await tasksApi.getForCalendar(startDate, endDate);
+            return result;
+        } catch (error: any) {
+            return rejectWithValue(
+                error.message || 'Ошибка загрузки задач из календаря',
+            );
+        }
+    },
+);
+
+// 7. Генерация расписания — 🔥 Уточнены типы
+export const generateSchedule = createAsyncThunk<
+    { variants: any[]; recommendedVariantId: string },
+    {
+        title: string;
+        description: string;
+        subtasks: Array<{ title: string; estimatedHours?: number }>;
+        dueDate: string;
+        onlyWeekdays?: boolean;
+    }
+>('tasks/generateSchedule', async (params, { rejectWithValue }) => {
+    try {
+        return await tasksApi.generateSchedule(
+            params.title,
+            params.description,
+            params.subtasks,
+            params.dueDate,
+            params.onlyWeekdays,
+        );
+    } catch (error: any) {
+        return rejectWithValue(error.message || 'Ошибка генерации расписания');
+    }
+});
+
+// 8. Сохранение задачи с расписанием
+export const saveTaskWithSchedule = createAsyncThunk<
+    Task,
+    {
+        title: string;
+        description: string;
+        subtasks: Array<{ title: string; estimatedHours?: number; startDate?: string; endDate?: string }>;
+        dueDate: string;
+        startDate: string;
+        endDate: string;
+        categoryId?: number;
+    }
+>('tasks/saveWithSchedule', async (params, { rejectWithValue }) => {
+    try {
+        return await tasksApi.saveWithSchedule(
+            params.title,
+            params.description,
+            params.subtasks,
+            params.dueDate,
+            params.startDate,
+            params.endDate,
+            params.categoryId,
+        );
+    } catch (error: any) {
+        return rejectWithValue(error.message || 'Ошибка сохранения задачи');
+    }
+});
 
 // ==================== SLICE ====================
 const taskSlice = createSlice({
@@ -98,13 +172,13 @@ const taskSlice = createSlice({
         clearError: (state) => {
             state.error = null;
         },
-        // Локальное обновление (без запроса к API, для оптимистичного UI)
+        // 🔥 Локальное обновление — ИСПРАВЛЕНО: taskId: number
         updateTaskLocally: (
             state,
-            action: PayloadAction<{ taskId: string; updates: Partial<Task> }>,
+            action: PayloadAction<{ taskId: number; updates: Partial<Task> }>,
         ) => {
             const index = state.tasks.findIndex(
-                (t) => t.id === action.payload.taskId,
+                (t) => t.id === action.payload.taskId, // 🔥 number === number
             );
             if (index !== -1) {
                 state.tasks[index] = {
@@ -136,7 +210,6 @@ const taskSlice = createSlice({
             })
             .addCase(createTask.fulfilled, (state, action) => {
                 state.loading = false;
-                console.log('✅ Redux сохранил задачу. Subtasks в стейте:', action.payload.subtasks);
                 state.tasks.push({ ...action.payload });
             })
             .addCase(createTask.rejected, (state, action) => {
@@ -144,14 +217,14 @@ const taskSlice = createSlice({
                 state.error = action.payload as string;
             })
 
-            // ===== UPDATE TASK (Drag-and-Drop / Edit) =====
+            // ===== UPDATE TASK — 🔥 ИСПРАВЛЕНО: сравнение number === number
             .addCase(updateTask.pending, (state) => {
                 state.loading = true;
             })
             .addCase(updateTask.fulfilled, (state, action) => {
                 state.loading = false;
                 const index = state.tasks.findIndex(
-                    (t) => t.id === action.payload.id,
+                    (t) => t.id === action.payload.id, // 🔥 number === number
                 );
                 if (index !== -1) {
                     state.tasks[index] = action.payload;
@@ -162,14 +235,14 @@ const taskSlice = createSlice({
                 state.error = action.payload as string;
             })
 
-            // ===== COMPLETE TASK (Self-finetuning) =====
+            // ===== COMPLETE TASK — 🔥 ИСПРАВЛЕНО: taskId: number
             .addCase(completeTask.pending, (state) => {
                 state.loading = true;
             })
             .addCase(completeTask.fulfilled, (state, action) => {
                 state.loading = false;
 
-                // Обновляем статус задачи
+                // 🔥 Сравнение number === number
                 const taskIndex = state.tasks.findIndex(
                     (t) => t.id === action.payload.taskId,
                 );
@@ -180,7 +253,6 @@ const taskSlice = createSlice({
                     };
                 }
 
-                // Обновляем метрики обучения
                 if (action.payload.newSpeedFactor !== undefined) {
                     state.userSpeedFactor = action.payload.newSpeedFactor;
                 }
@@ -193,14 +265,55 @@ const taskSlice = createSlice({
                 state.error = action.payload as string;
             })
 
-            // ===== DELETE TASK =====
+            // ===== DELETE TASK — 🔥 ИСПРАВЛЕНО: number
             .addCase(deleteTask.fulfilled, (state, action) => {
                 state.tasks = state.tasks.filter(
-                    (t) => t.id !== action.payload,
+                    (t) => t.id !== action.payload, // 🔥 number !== number
                 );
                 if (state.selectedTask?.id === action.payload) {
                     state.selectedTask = null;
                 }
+            })
+
+            // ===== FETCH TASKS FOR CALENDAR =====
+            .addCase(fetchTasksForCalendar.pending, (state) => {
+                state.loading = true;
+                state.error = null;
+            })
+            .addCase(fetchTasksForCalendar.fulfilled, (state, action) => {
+                state.loading = false;
+                state.tasks = action.payload.map((t) => ({ ...t }));
+            })
+            .addCase(fetchTasksForCalendar.rejected, (state, action) => {
+                state.loading = false;
+                state.error = action.payload as string;
+            })
+
+            // ===== GENERATE SCHEDULE =====
+            .addCase(generateSchedule.pending, (state) => {
+                state.loading = true;
+                state.error = null;
+            })
+            .addCase(generateSchedule.fulfilled, (state) => {
+                state.loading = false;
+            })
+            .addCase(generateSchedule.rejected, (state, action) => {
+                state.loading = false;
+                state.error = action.payload as string;
+            })
+
+            // ===== SAVE TASK WITH SCHEDULE =====
+            .addCase(saveTaskWithSchedule.pending, (state) => {
+                state.loading = true;
+                state.error = null;
+            })
+            .addCase(saveTaskWithSchedule.fulfilled, (state, action) => {
+                state.loading = false;
+                state.tasks.push({ ...action.payload });
+            })
+            .addCase(saveTaskWithSchedule.rejected, (state, action) => {
+                state.loading = false;
+                state.error = action.payload as string;
             });
     },
 });
